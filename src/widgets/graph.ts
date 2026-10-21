@@ -28,6 +28,9 @@ interface Memory {
 }
 const memory = new Map<string, Memory>();
 
+const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+const MAX_SPEED = 25;
+
 const PALETTE = ["#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6", "#8b5cf6", "#84cc16", "#f97316"];
 
 function hash(s: string): number {
@@ -77,8 +80,10 @@ export const graphType: WidgetType = {
 				path,
 				name,
 				group: slash === -1 ? "" : path.slice(0, slash),
-				x: prev?.x ?? (Math.random() - 0.5) * 400,
-				y: prev?.y ?? (Math.random() - 0.5) * 400,
+				// New notes start on a phyllotaxis spiral sized to the vault, so a few thousand
+				// notes don't all start on top of each other and get flung out of view.
+				x: prev?.x ?? 10 * Math.sqrt(0.5 + i) * Math.cos(i * GOLDEN),
+				y: prev?.y ?? 10 * Math.sqrt(0.5 + i) * Math.sin(i * GOLDEN),
 				vx: 0,
 				vy: 0,
 				deg: 0,
@@ -103,6 +108,7 @@ export const graphType: WidgetType = {
 		}
 		if (showOrphans) for (const f of app.vault.getMarkdownFiles()) if (inScope(f.path)) nodeFor(f.path);
 		for (const n of nodes) n.r = 2.5 + Math.sqrt(n.deg) * 1.6;
+		const hubDeg = nodes.map((n) => n.deg).sort((a, b) => b - a)[Math.min(9, nodes.length - 1)] ?? 0;
 		const neighbors: number[][] = nodes.map(() => []);
 		for (const [a, b] of edges) {
 			neighbors[a].push(b);
@@ -126,14 +132,16 @@ export const graphType: WidgetType = {
 		const accent = css.getPropertyValue("--dash-accent").trim() || "#7c3aed";
 		const muted = css.getPropertyValue("--text-faint").trim() || "#888";
 		const textColor = css.getPropertyValue("--text-normal").trim() || "#ddd";
+		// Canvas fonts can't use var(); resolve the interface font once.
+		const font = css.getPropertyValue("--font-interface").trim() || "sans-serif";
 		const colorOf = (n: Node): string =>
 			colorFolders && groups.length > 1 ? PALETTE[hash(n.group) % PALETTE.length] : accent;
 
 		let W = 0;
 		let H = 0;
 		const dpr = window.devicePixelRatio || 1;
-		const view: View = mem.view ?? { x: 0, y: 0, k: 1 };
-		let fitted = !!mem.view && isFinite(view.k) && view.k > 0;
+		const view: View = { ...(mem.view ?? { x: 0, y: 0, k: 1 }) };
+		let fitted = !!mem.view && [view.x, view.y, view.k].every(isFinite) && view.k > 0;
 		const resize = (): void => {
 			W = wrap.clientWidth;
 			H = wrap.clientHeight;
@@ -203,6 +211,11 @@ export const graphType: WidgetType = {
 				n.vy -= n.y * 0.004 * alpha;
 				n.vx *= 0.6;
 				n.vy *= 0.6;
+				const speed = Math.hypot(n.vx, n.vy);
+				if (speed > MAX_SPEED) {
+					n.vx *= MAX_SPEED / speed;
+					n.vy *= MAX_SPEED / speed;
+				}
 				n.x += n.vx;
 				n.y += n.vy;
 			}
@@ -212,16 +225,15 @@ export const graphType: WidgetType = {
 		const fit = (): boolean => {
 			// Not laid out yet: fitting to a 0×0 box would park the camera off-screen.
 			if (W <= 0 || H <= 0) return false;
-			let minX = Infinity;
-			let minY = Infinity;
-			let maxX = -Infinity;
-			let maxY = -Infinity;
-			for (const n of nodes) {
-				minX = Math.min(minX, n.x);
-				minY = Math.min(minY, n.y);
-				maxX = Math.max(maxX, n.x);
-				maxY = Math.max(maxY, n.y);
-			}
+			// Fit the central 96% so a few stray notes can't shrink everything else to dust.
+			const xs = nodes.map((n) => n.x).sort((a, b) => a - b);
+			const ys = nodes.map((n) => n.y).sort((a, b) => a - b);
+			const lo = Math.floor(nodes.length * 0.02);
+			const hi = nodes.length - 1 - lo;
+			const minX = xs[lo];
+			const maxX = xs[hi];
+			const minY = ys[lo];
+			const maxY = ys[hi];
 			const k = Math.min(W / (maxX - minX + 40), H / (maxY - minY + 40), 3);
 			view.k = isFinite(k) && k > 0 ? k : 1;
 			view.x = W / 2 - ((minX + maxX) / 2) * view.k;
@@ -272,9 +284,10 @@ export const graphType: WidgetType = {
 			// Labels: hovered neighbourhood always, otherwise only hubs, more as you zoom in.
 			g.globalAlpha = 1;
 			g.fillStyle = textColor;
-			g.font = `${11 / view.k}px var(--font-interface, sans-serif)`;
+			g.font = `${11 / view.k}px ${font}`;
 			g.textAlign = "center";
-			const minDeg = view.k > 2.2 ? 0 : view.k > 1.2 ? 3 : 8;
+			// Zoomed out: only the top hubs; zooming in reveals progressively more names.
+			const minDeg = view.k > 2.2 ? 0 : view.k > 1.2 ? Math.max(3, hubDeg / 2) : Math.max(3, hubDeg);
 			for (let i = 0; i < nodes.length; i++) {
 				const n = nodes[i];
 				if (lit ? !lit.has(i) : n.deg < minDeg) continue;
@@ -283,13 +296,24 @@ export const graphType: WidgetType = {
 		};
 
 		let raf = 0;
+		let failed = false;
 		const loop = (): void => {
 			raf = 0;
-			if (alpha > 0) {
-				tick();
-				if (!fitted && alpha < 0.5) fitted = fit();
+			if (failed) return;
+			try {
+				if (alpha > 0) tick();
+				// Fit whenever the widget first has a real size, not only while settling:
+				// a dashboard opened in a background tab measures 0×0 until it is shown.
+				if (!fitted) fitted = fit();
+				if (![view.x, view.y, view.k].every(isFinite) || view.k <= 0) fitted = fit();
+				draw();
+			} catch (e) {
+				failed = true;
+				console.error("Aurora graph widget:", e);
+				wrap.empty();
+				wrap.createDiv("dash-widget-error").setText(`Graph failed to draw: ${String(e)}`);
+				return;
 			}
-			draw();
 			if (alpha > 0 || dragged) raf = requestAnimationFrame(loop);
 		};
 		function kick(a = 0): void {
@@ -412,6 +436,11 @@ export const graphType: WidgetType = {
 			kick();
 		});
 
+		if (!mem.pos.size) {
+			const t0 = performance.now();
+			while (alpha > 0.05 && performance.now() - t0 < 400) tick();
+		}
+
 		const ro = new ResizeObserver(resize);
 		ro.observe(wrap);
 		resize();
@@ -441,7 +470,7 @@ export const graphType: WidgetType = {
 			ro.disconnect();
 			if (raf) cancelAnimationFrame(raf);
 			mem.pos = new Map(nodes.map((n) => [n.path, { x: n.x, y: n.y }]));
-			mem.view = { ...view };
+			mem.view = fitted ? { ...view } : undefined;
 		});
 		return {};
 	},
