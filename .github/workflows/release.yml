@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag of the release to (re)upload assets to, e.g. 1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ github.workspace }}/main.js
+            ${{ github.workspace }}/manifest.json
+            ${{ github.workspace }}/styles.css
+
+      - name: Smoke test
+        run: node smoke/build.mjs && node smoke/out.js
+
+      - name: Resolve release tag
+        id: resolve_tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag matches the plugin version
+        run: |
+          TAG="${{ steps.resolve_tag.outputs.tag }}"
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::tag $TAG does not match manifest.json ($MANIFEST)"
+            exit 1
+          fi
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $TAG does not match package.json ($PKG)"
+            exit 1
+          fi
+          node -e "const v=require('./versions.json'); if(!v[process.argv[1]]){ console.error('versions.json has no entry for '+process.argv[1]); process.exit(1); }" "$TAG"
+
+      - name: Build release notes
+        run: |
+          TAG="${{ steps.resolve_tag.outputs.tag }}"
+          PREV=$(git describe --tags --abbrev=0 "$TAG"^ 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            git log --pretty=format:'- %s' "$PREV".."$TAG" > RELEASE_NOTES.md
+          elif git rev-parse "$TAG^" >/dev/null 2>&1; then
+            git log --pretty=format:'- %s' "$TAG"^.."$TAG" > RELEASE_NOTES.md
+          else
+            echo "Initial release." > RELEASE_NOTES.md
+          fi
+          printf '\n\nAutomated release from the Aurora Dashboard repo.\n' >> RELEASE_NOTES.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve_tag.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            main.js
+            manifest.json
+            styles.css
+          overwrite_files: true
+          fail_on_unmatched_files: true

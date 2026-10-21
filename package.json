@@ -1,0 +1,29 @@
+{
+	"name": "aurora-dashboard",
+	"version": "1.2.11",
+	"description": "A polished interactive dashboard and control center for Obsidian.",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+	},
+	"keywords": [
+		"obsidian",
+		"dashboard",
+		"widgets",
+		"control-center"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"esbuild": "^0.19.11",
+		"jsdom": "^30.0.1",
+		"obsidian": "^1.5.11",
+		"tslib": "^2.6.2",
+		"typescript": "^5.3.3"
+	},
+	"allowScripts": {
+		"esbuild@0.19.12": true
+	}
+}
+
