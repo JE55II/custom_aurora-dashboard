@@ -9,6 +9,8 @@ A fork of [stef4678/aurora-dashboard](https://github.com/stef4678/aurora-dashboa
 - Hover a note to highlight it and its neighbours; click to open it; drag a note to move it
 - Drag the background to pan, wheel or pinch to zoom, double-click to fit everything on screen
 - Options (edit mode → gear): limit to one folder, show/hide orphan notes, color by folder
+- **Show names**: *Hubs* (the most-linked notes, more as you zoom in), *All* or *None*; hovering always shows names
+- **Groups**: rules made of a `#tag` (nested tags included) or a folder path, each with a color and an on/off switch. A note takes the color of the first group it matches (reorder with ↑), a legend shows the groups, and switching a group off hides its notes; *Show other notes* does the same for notes that match no group
 - Keeps its layout across re-renders and only redraws when the link structure changes; built to stay smooth on vaults of a couple thousand notes
 
 Source: [`src/widgets/graph.ts`](src/widgets/graph.ts).

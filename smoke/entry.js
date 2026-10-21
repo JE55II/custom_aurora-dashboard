@@ -936,6 +936,28 @@ async function main() {
 	checks.quickActionSavedWithoutDone = Array.isArray(qaInst2.settings.actions) && qaInst2.settings.actions.length === 1;
 	qaModal.close();
 
+	// graph: the custom editor opens with groups and every name mode, and closes cleanly
+	const graphInst = {
+		type: "graph",
+		uid: "gr1",
+		x: 0,
+		y: 0,
+		w: 6,
+		h: 5,
+		settings: { names: "None", groups: [{ query: "#tag", color: "#ff0000", show: false }, { query: "Notes" }], showOther: false },
+	};
+	let graphModalOk = false;
+	try {
+		getWidgetTypes().find((t) => t.type === "graph").openSettings(modalPlugin, graphInst);
+		await tick(20);
+		const graphModal = Modal.last;
+		graphModalOk = !!graphModal.contentEl.querySelector(".dash-modal-foot .dash-btn-accent");
+		graphModal.close();
+	} catch (e) {
+		console.error("graph settings modal:", e);
+	}
+	checks.graphSettingsModalOpens = graphModalOk;
+
 	// habits: add one, close without Done
 	const habInst2 = byUid("hb2");
 	getWidgetTypes().find((t) => t.type === "habits").openSettings(modalPlugin, habInst2);

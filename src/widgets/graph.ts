@@ -1,5 +1,5 @@
-import { TFile, type MetadataCache } from "obsidian";
-import type { WidgetType } from "../types";
+import { App, getAllTags, Modal, Setting, TFile, type MetadataCache } from "obsidian";
+import type { DashboardPlugin, WidgetInstance, WidgetType } from "../types";
 import { registerWidgetType } from "../registry";
 
 interface Node {
@@ -12,6 +12,8 @@ interface Node {
 	vy: number;
 	deg: number;
 	r: number;
+	/** Index of the colour group this note belongs to, -1 for none. */
+	rule: number;
 }
 
 interface View {
@@ -33,6 +35,57 @@ const MAX_SPEED = 25;
 
 const PALETTE = ["#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6", "#8b5cf6", "#84cc16", "#f97316"];
 
+type NameMode = "Hubs" | "All" | "None";
+const NAME_MODES: NameMode[] = ["Hubs", "All", "None"];
+
+/** A colour rule: `#tag` (also matches nested tags) or a folder path. First match wins. */
+interface GraphGroup {
+	query: string;
+	color: string;
+	show: boolean;
+}
+
+function readGroups(inst: WidgetInstance): GraphGroup[] {
+	const raw = Array.isArray(inst.settings.groups) ? (inst.settings.groups as unknown[]) : [];
+	return raw
+		.filter((g): g is Record<string, unknown> => !!g && typeof g === "object")
+		.map((g, i) => ({
+			query: typeof g.query === "string" ? g.query : "",
+			color: typeof g.color === "string" && g.color ? g.color : PALETTE[i % PALETTE.length],
+			show: g.show !== false,
+		}));
+}
+
+/** Returns, for a note path, the index of the first group it matches (-1 for none). */
+function groupMatcher(app: App, groups: GraphGroup[]): (path: string) => number {
+	const rules = groups.map((g) => {
+		const q = g.query.trim();
+		if (q.startsWith("#")) {
+			const tag = q.slice(1).toLowerCase();
+			return { tag, folder: "" };
+		}
+		return { tag: "", folder: q.replace(/^\/+|\/+$/g, "") };
+	});
+	const needTags = rules.some((r) => r.tag);
+	return (path) => {
+		let tags: string[] | null = null;
+		for (let i = 0; i < rules.length; i++) {
+			const r = rules[i];
+			if (r.folder) {
+				if (path.startsWith(r.folder + "/")) return i;
+			} else if (r.tag && needTags) {
+				if (!tags) {
+					const f = app.vault.getAbstractFileByPath(path);
+					const cache = f instanceof TFile ? app.metadataCache.getFileCache(f) : null;
+					tags = cache ? (getAllTags(cache) ?? []).map((t) => t.replace(/^#/, "").toLowerCase()) : [];
+				}
+				if (tags.some((t) => t === r.tag || t.startsWith(r.tag + "/"))) return i;
+			}
+		}
+		return -1;
+	};
+}
+
 function hash(s: string): number {
 	let h = 0;
 	for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
@@ -46,17 +99,27 @@ export const graphType: WidgetType = {
 	icon: "git-fork",
 	min: { w: 3, h: 3 },
 	defaultSize: { w: 6, h: 5 },
-	defaultSettings: { orphans: true, folder: "", colorFolders: true },
-	settings: [
-		{ key: "folder", label: "Only notes under folder (empty = whole vault)", type: "text", placeholder: "e.g. Clients" },
-		{ key: "orphans", label: "Show orphan notes", type: "toggle" },
-		{ key: "colorFolders", label: "Color by top-level folder", type: "toggle" },
-	],
+	defaultSettings: { orphans: true, folder: "", colorFolders: true, names: "Hubs", groups: [], showOther: true },
+	openSettings(plugin, inst) {
+		new GraphSettingsModal(plugin.app, plugin, inst).open();
+	},
 	render(ctx) {
 		const app = ctx.plugin.app;
 		const folder = String(ctx.inst.settings.folder ?? "").replace(/^\/+|\/+$/g, "");
 		const showOrphans = ctx.inst.settings.orphans !== false;
 		const colorFolders = ctx.inst.settings.colorFolders !== false;
+		const names: NameMode = NAME_MODES.includes(ctx.inst.settings.names as NameMode)
+			? (ctx.inst.settings.names as NameMode)
+			: "Hubs";
+		const rules = readGroups(ctx.inst).filter((g) => g.query.trim());
+		const showOther = ctx.inst.settings.showOther !== false;
+		const ruleOf = groupMatcher(app, rules);
+		const ruleCache = new Map<string, number>();
+		const ruleFor = (p: string): number => {
+			let r = ruleCache.get(p);
+			if (r === undefined) ruleCache.set(p, (r = ruleOf(p)));
+			return r;
+		};
 		const mem: Memory = memory.get(ctx.inst.uid) ?? { pos: new Map() };
 		memory.set(ctx.inst.uid, mem);
 
@@ -64,7 +127,12 @@ export const graphType: WidgetType = {
 		const resolved =
 			(app.metadataCache as MetadataCache & { resolvedLinks?: Record<string, Record<string, number>> })
 				.resolvedLinks ?? {};
-		const inScope = (p: string): boolean => p.endsWith(".md") && (!folder || p.startsWith(folder + "/"));
+		const inScope = (p: string): boolean => {
+			if (!p.endsWith(".md") || (folder && !p.startsWith(folder + "/"))) return false;
+			if (!rules.length) return true;
+			const r = ruleFor(p);
+			return r < 0 ? showOther : rules[r].show;
+		};
 		const index = new Map<string, number>();
 		const nodes: Node[] = [];
 		const edgeSet = new Set<string>();
@@ -88,6 +156,7 @@ export const graphType: WidgetType = {
 				vy: 0,
 				deg: 0,
 				r: 0,
+				rule: ruleFor(path),
 			});
 			index.set(path, i);
 			return i;
@@ -135,7 +204,28 @@ export const graphType: WidgetType = {
 		// Canvas fonts can't use var(); resolve the interface font once.
 		const font = css.getPropertyValue("--font-interface").trim() || "sans-serif";
 		const colorOf = (n: Node): string =>
-			colorFolders && groups.length > 1 ? PALETTE[hash(n.group) % PALETTE.length] : accent;
+			n.rule >= 0
+				? rules[n.rule].color
+				: colorFolders && groups.length > 1
+				? PALETTE[hash(n.group) % PALETTE.length]
+				: rules.length
+				? muted
+				: accent;
+
+		if (rules.length) {
+			const legend = wrap.createDiv("dash-graph-legend");
+			rules.forEach((r) => {
+				if (!r.show) return;
+				const chip = legend.createDiv("dash-graph-legend-item");
+				chip.createSpan({ cls: "dash-graph-legend-dot" }).style.background = r.color;
+				chip.createSpan({ text: r.query.trim() });
+			});
+			if (showOther) {
+				const chip = legend.createDiv("dash-graph-legend-item");
+				chip.createSpan({ cls: "dash-graph-legend-dot" }).style.background = colorFolders ? "conic-gradient(#7c3aed, #0ea5e9, #10b981, #f59e0b, #ef4444, #7c3aed)" : muted;
+				chip.createSpan({ text: "Other" });
+			}
+		}
 
 		let W = 0;
 		let H = 0;
@@ -287,7 +377,14 @@ export const graphType: WidgetType = {
 			g.font = `${11 / view.k}px ${font}`;
 			g.textAlign = "center";
 			// Zoomed out: only the top hubs; zooming in reveals progressively more names.
-			const minDeg = view.k > 2.2 ? 0 : view.k > 1.2 ? Math.max(3, hubDeg / 2) : Math.max(3, hubDeg);
+			const minDeg =
+				names === "None"
+					? Infinity
+					: names === "All" || view.k > 2.2
+					? 0
+					: view.k > 1.2
+					? Math.max(3, hubDeg / 2)
+					: Math.max(3, hubDeg);
 			for (let i = 0; i < nodes.length; i++) {
 				const n = nodes[i];
 				if (lit ? !lit.has(i) : n.deg < minDeg) continue;
@@ -477,3 +574,183 @@ export const graphType: WidgetType = {
 };
 
 registerWidgetType(graphType);
+
+class GraphSettingsModal extends Modal {
+	plugin: DashboardPlugin;
+	inst: WidgetInstance;
+	private timer = 0;
+
+	constructor(app: App, plugin: DashboardPlugin, inst: WidgetInstance) {
+		super(app);
+		this.plugin = plugin;
+		this.inst = inst;
+	}
+
+	onOpen(): void {
+		this.titleEl.setText((this.inst.title || "Graph") + " — settings");
+		this.render();
+	}
+
+	onClose(): void {
+		if (this.timer) {
+			window.clearTimeout(this.timer);
+			this.commit();
+		}
+		this.contentEl.empty();
+	}
+
+	private commit(): void {
+		this.timer = 0;
+		void this.plugin.saveSettings();
+		this.plugin.refreshWidget(this.inst.uid);
+	}
+
+	/** Typing in a text field re-lays out the graph; wait for a pause first. */
+	private commitSoon(): void {
+		window.clearTimeout(this.timer);
+		this.timer = window.setTimeout(() => this.commit(), 500);
+	}
+
+	private get groups(): GraphGroup[] {
+		return readGroups(this.inst);
+	}
+
+	private setGroups(groups: GraphGroup[]): void {
+		this.inst.settings.groups = groups.map((g) => ({ ...g }));
+	}
+
+	private render(): void {
+		const { contentEl } = this;
+		const s = this.inst.settings;
+		contentEl.empty();
+
+		new Setting(contentEl).setName("Title").setDesc("Leave blank to use the default").addText((tb) =>
+			tb.setValue(this.inst.title ?? "").onChange((v) => {
+				this.inst.title = v || undefined;
+				this.commitSoon();
+			})
+		);
+		new Setting(contentEl)
+			.setName("Show names")
+			.setDesc("Hubs: the most-linked notes, more as you zoom in. Hovering always shows names.")
+			.addDropdown((dd) => {
+				for (const m of NAME_MODES) dd.addOption(m, m);
+				dd.setValue(NAME_MODES.includes(s.names as NameMode) ? String(s.names) : "Hubs").onChange((v) => {
+					s.names = v;
+					this.commit();
+				});
+			});
+		new Setting(contentEl)
+			.setName("Only notes under folder")
+			.setDesc("Empty = whole vault")
+			.addText((tb) =>
+				tb
+					.setPlaceholder("e.g. Clients")
+					.setValue(String(s.folder ?? ""))
+					.onChange((v) => {
+						s.folder = v;
+						this.commitSoon();
+					})
+			);
+		new Setting(contentEl).setName("Show orphan notes").addToggle((tg) =>
+			tg.setValue(s.orphans !== false).onChange((v) => {
+				s.orphans = v;
+				this.commit();
+			})
+		);
+		new Setting(contentEl)
+			.setName("Color other notes by top-level folder")
+			.setDesc("Notes that match no group below")
+			.addToggle((tg) =>
+				tg.setValue(s.colorFolders !== false).onChange((v) => {
+					s.colorFolders = v;
+					this.commit();
+				})
+			);
+
+		new Setting(contentEl)
+			.setName("Groups")
+			.setDesc("A #tag or a folder path. A note takes the color of the first group it matches; switch a group off to hide its notes.")
+			.setHeading();
+		const groups = this.groups;
+		groups.forEach((g, i) => {
+			const row = new Setting(contentEl);
+			row.addText((tb) =>
+				tb
+					.setPlaceholder("#tag or folder/path")
+					.setValue(g.query)
+					.onChange((v) => {
+						const next = this.groups;
+						next[i].query = v;
+						this.setGroups(next);
+						this.commitSoon();
+					})
+			);
+			row.addColorPicker((cp) =>
+				cp.setValue(g.color).onChange((v) => {
+					const next = this.groups;
+					next[i].color = v;
+					this.setGroups(next);
+					this.commitSoon();
+				})
+			);
+			row.addToggle((tg) =>
+				tg
+					.setTooltip("Show this group")
+					.setValue(g.show)
+					.onChange((v) => {
+						const next = this.groups;
+						next[i].show = v;
+						this.setGroups(next);
+						this.commit();
+					})
+			);
+			row.addExtraButton((b) =>
+				b
+					.setIcon("arrow-up")
+					.setTooltip("Move up (earlier groups win)")
+					.setDisabled(i === 0)
+					.onClick(() => {
+						if (i === 0) return;
+						const next = this.groups;
+						[next[i - 1], next[i]] = [next[i], next[i - 1]];
+						this.setGroups(next);
+						this.commit();
+						this.render();
+					})
+			);
+			row.addExtraButton((b) =>
+				b
+					.setIcon("trash")
+					.setTooltip("Remove group")
+					.onClick(() => {
+						this.setGroups(this.groups.filter((_, j) => j !== i));
+						this.commit();
+						this.render();
+					})
+			);
+		});
+		new Setting(contentEl).addButton((b) =>
+			b.setButtonText("Add group").onClick(() => {
+				const next = this.groups;
+				next.push({ query: "", color: PALETTE[next.length % PALETTE.length], show: true });
+				this.setGroups(next);
+				this.render();
+			})
+		);
+		new Setting(contentEl)
+			.setName("Show other notes")
+			.setDesc("Notes that match no group (only applies once a group exists)")
+			.addToggle((tg) =>
+				tg.setValue(s.showOther !== false).onChange((v) => {
+					s.showOther = v;
+					this.commit();
+				})
+			);
+
+		const foot = contentEl.createDiv("dash-modal-foot");
+		const done = foot.createDiv("dash-btn dash-btn-accent");
+		done.setText("Done");
+		done.addEventListener("click", () => this.close());
+	}
+}
