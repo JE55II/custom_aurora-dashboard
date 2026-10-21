@@ -13,6 +13,13 @@ A fork of [stef4678/aurora-dashboard](https://github.com/stef4678/aurora-dashboa
 
 Source: [`src/widgets/graph.ts`](src/widgets/graph.ts).
 
+### Note heatmap and CVEs per day
+
+- **Note heatmap**: a year heatmap (Jan 1 → today) for one source, picked in the widget settings: *Daily News* (`📡Koffei/Daily CyberNews`, notes tagged `#CyberNews`), *SOC Operations* (`♻️ DailyNotes/Soc Operation/SocTickets/YYYY/MM-Month/DD`, tagged `#soc_operation`) or *Astreinte* (`🔎⏰Astreintes`, tagged `#astreinte`). Same rules as the "Heatmaps for nerds" dataviewjs blocks (one note = one post; a ticket note counts each distinct `HOR-n` ID in its name), without Dataview or Heatmap Calendar.
+- **CVEs per day**: bars of new CVEs per day over the last 30 days (7–90), read from the `## Update Tracker` section of `CVE-Report-Index`. The count comes from each run's title ("87 new CVEs", "twenty new CVEs", "one CVE added"); untitled counts fall back to a "- N CVEs" line, then to CVE IDs seen in the tracker for the first time. Hover a bar for the runs behind it.
+
+Source: [`src/widgets/nerds.ts`](src/widgets/nerds.ts).
+
 ### License
 
 This fork is released under the GPL-3.0 ([LICENSE](LICENSE)). The original Aurora Dashboard code is © 2026 Kerekes Stefan under the MIT license, whose notice is kept in [LICENSE-MIT](LICENSE-MIT).

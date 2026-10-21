@@ -1583,3 +1583,25 @@ select.dash-qa-select {
 	color: var(--text-faint);
 	pointer-events: none;
 }
+
+/* CVEs per day */
+.dash-cve {
+	display: flex;
+	align-items: stretch;
+	gap: 2px;
+	height: calc(100% - 40px);
+	min-height: 60px;
+}
+.dash-cve-col {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	cursor: help;
+}
+.dash-cve .dash-spark-bar {
+	border-radius: 3px 3px 1px 1px;
+}
+.dash-cve .dash-spark-bar.dash-cve-zero {
+	min-height: 0;
+}
