@@ -133,7 +133,7 @@ export const graphType: WidgetType = {
 		let H = 0;
 		const dpr = window.devicePixelRatio || 1;
 		const view: View = mem.view ?? { x: 0, y: 0, k: 1 };
-		let fitted = !!mem.view;
+		let fitted = !!mem.view && isFinite(view.k) && view.k > 0;
 		const resize = (): void => {
 			W = wrap.clientWidth;
 			H = wrap.clientHeight;
@@ -209,7 +209,9 @@ export const graphType: WidgetType = {
 			alpha = Math.max(0, alpha * 0.985 - 0.0005);
 		};
 
-		const fit = (): void => {
+		const fit = (): boolean => {
+			// Not laid out yet: fitting to a 0×0 box would park the camera off-screen.
+			if (W <= 0 || H <= 0) return false;
 			let minX = Infinity;
 			let minY = Infinity;
 			let maxX = -Infinity;
@@ -224,6 +226,7 @@ export const graphType: WidgetType = {
 			view.k = isFinite(k) && k > 0 ? k : 1;
 			view.x = W / 2 - ((minX + maxX) / 2) * view.k;
 			view.y = H / 2 - ((minY + maxY) / 2) * view.k;
+			return true;
 		};
 
 		// --- drawing ------------------------------------------------------------
@@ -284,10 +287,7 @@ export const graphType: WidgetType = {
 			raf = 0;
 			if (alpha > 0) {
 				tick();
-				if (!fitted && alpha < 0.5) {
-					fit();
-					fitted = true;
-				}
+				if (!fitted && alpha < 0.5) fitted = fit();
 			}
 			draw();
 			if (alpha > 0 || dragged) raf = requestAnimationFrame(loop);
