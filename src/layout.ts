@@ -204,6 +204,7 @@ export function defaultLayout(columns = 12): WidgetInstance[] {
 		{ type: "streak", x: 8, y: 16, w: 4, h: 2 },
 		{ type: "habits", x: 0, y: 19, w: 6, h: 4 },
 		{ type: "embed", x: 6, y: 19, w: 6, h: 4 },
+		{ type: "graph", x: 0, y: 23, w: 12, h: 6 },
 	]);
 
 	const cols = Math.max(1, Math.round(columns));
