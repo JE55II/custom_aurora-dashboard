@@ -4,7 +4,7 @@ import { registerWidgetType } from "../registry";
 import { dateKey } from "../utils";
 
 /**
- * Year heatmaps of the SOC ticket and night-duty (astreinte) notes. Native, so
+ * Year heatmaps of the SOC ticket and night-duty (on-call) notes. Native, so
  * they need neither Dataview nor Heatmap Calendar.
  */
 
@@ -77,8 +77,8 @@ const SOURCES: Record<string, Source> = {
 			return c;
 		},
 	},
-	Astreinte: {
-		folder: "🔎⏰Astreintes",
+	"On-Call": {
+		folder: "🔎⏰On-Call",
 		color: "hsl(252, 45%, 45%)",
 		unit: "ticket",
 		async count(app, files) {
@@ -86,7 +86,7 @@ const SOURCES: Record<string, Source> = {
 			const prefixes = await ticketPrefixes(app);
 			for (const f of files) {
 				const content = await app.vault.cachedRead(f);
-				if (!tagsOf(app, f).includes("astreinte") && !/#astreinte\b/.test(content)) continue;
+				if (!tagsOf(app, f).includes("on_call") && !/#on_call\b/.test(content)) continue;
 				// Newer tickets: "date" property (or legacy "Date"); older ones: "**Date** : YYYY-MM-DD" in the body;
 				// last resort: file creation date.
 				const fm = app.metadataCache.getFileCache(f)?.frontmatter;
@@ -119,7 +119,7 @@ function refreshOnChange(ctx: WidgetCtx): void {
 export const noteHeatmapType: WidgetType = {
 	type: "noteheatmap",
 	name: "Note heatmap",
-	description: "Year heatmap of SOC operations or astreintes",
+	description: "Year heatmap of SOC operations or on-call duty",
 	icon: "calendar-range",
 	min: { w: 4, h: 2 },
 	defaultSize: { w: 6, h: 3 },

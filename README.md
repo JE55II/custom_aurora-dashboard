@@ -17,7 +17,7 @@ Source: [`src/widgets/graph.ts`](src/widgets/graph.ts).
 
 ### Note heatmap
 
-- **Note heatmap**: a year heatmap (Jan 1 → today) for one source, picked in the widget settings: *SOC Operations* (`♻️ DailyNotes/Soc Operation/SocTickets/YYYY/MM-Month/DD`, tagged `#soc_operation`) or *Astreinte* (`🔎⏰Astreintes`, tagged `#astreinte`). A note counts once per ticket ID in its name; the ID prefix is read from `const TICKET_PREFIX = "…"` in the templates of the vault. The *Astreinte* date comes from the `date` property (or the legacy `Date`), then a `**Date** :` line, then the file creation date.
+- **Note heatmap**: a year heatmap (Jan 1 → today) for one source, picked in the widget settings: *SOC Operations* (`♻️ DailyNotes/Soc Operation/SocTickets/YYYY/MM-Month/DD`, tagged `#soc_operation`) or *On-Call* (`🔎⏰On-Call`, tagged `#on_call`). A note counts once per ticket ID in its name; the ID prefix is read from `const TICKET_PREFIX = "…"` in the templates of the vault. The *On-Call* date comes from the `date` property (or the legacy `Date`), then a `**Date** :` line, then the file creation date.
 
 Source: [`src/widgets/nerds.ts`](src/widgets/nerds.ts).
 
