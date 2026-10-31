@@ -25,9 +25,29 @@ function tagsOf(app: App, f: TFile): string[] {
 	return cache ? (getAllTags(cache) ?? []).map((t) => t.replace(/^#/, "").toLowerCase()) : [];
 }
 
-/** One note may bundle several tickets ("HOR-1 HOR-2.md"): count each distinct ID. */
-function ticketCount(name: string): number {
-	return new Set((name.match(/HOR-\d+/gi) ?? []).map((s) => s.toUpperCase())).size || 1;
+/**
+ * Ticket ID prefixes the user set in the templates (`const TICKET_PREFIX = "INC"`),
+ * read from the Templater templates folder so the prefix is edited in one place only.
+ */
+async function ticketPrefixes(app: App): Promise<string[]> {
+	const templater = (app as unknown as {
+		plugins?: { plugins?: Record<string, { settings?: { templates_folder?: string } }> };
+	}).plugins?.plugins?.["templater-obsidian"];
+	const folder = templater?.settings?.templates_folder || "Obsidian-Templates/templates";
+	const found = new Set<string>();
+	for (const f of app.vault.getMarkdownFiles()) {
+		if (!f.path.startsWith(folder + "/")) continue;
+		const m = /const\s+TICKET_PREFIX\s*=\s*["'`]([^"'`]+)["'`]/.exec(await app.vault.cachedRead(f));
+		if (m) found.add(m[1]);
+	}
+	return [...found];
+}
+
+/** One note may bundle several tickets ("INC-1 INC-2.md"): count each distinct ID. */
+function ticketCount(name: string, prefixes: string[]): number {
+	if (!prefixes.length) return 1;
+	const alt = prefixes.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+	return new Set((name.match(new RegExp(`(?:${alt})-\\d+`, "gi")) ?? []).map((s) => s.toUpperCase())).size || 1;
 }
 
 function add(c: Counts, date: string, n: number): void {
@@ -57,6 +77,7 @@ const SOURCES: Record<string, Source> = {
 		unit: "ticket",
 		async count(app, files) {
 			const c: Counts = {};
+			const prefixes = await ticketPrefixes(app);
 			for (const f of files) {
 				if (!tagsOf(app, f).includes("soc_operation")) {
 					if (!/#soc_operation\b/.test(await app.vault.cachedRead(f))) continue;
@@ -68,7 +89,7 @@ const SOURCES: Record<string, Source> = {
 				const mm = /^(\d{2})/.exec(month)?.[1];
 				const dd = day.replace(/\D/g, "").padStart(2, "0");
 				if (!/^\d{4}$/.test(year) || !mm || !dd) continue;
-				add(c, `${year}-${mm}-${dd}`, ticketCount(f.basename));
+				add(c, `${year}-${mm}-${dd}`, ticketCount(f.basename, prefixes));
 			}
 			return c;
 		},
@@ -79,17 +100,18 @@ const SOURCES: Record<string, Source> = {
 		unit: "ticket",
 		async count(app, files) {
 			const c: Counts = {};
+			const prefixes = await ticketPrefixes(app);
 			for (const f of files) {
 				const content = await app.vault.cachedRead(f);
 				if (!tagsOf(app, f).includes("astreinte") && !/#astreinte\b/.test(content)) continue;
-				// Newer tickets: "Date" property; older ones: "**Date** : YYYY-MM-DD" in the body;
+				// Newer tickets: "date" property (or legacy "Date"); older ones: "**Date** : YYYY-MM-DD" in the body;
 				// last resort: file creation date.
 				const fm = app.metadataCache.getFileCache(f)?.frontmatter;
 				const date =
-					ISO.exec(String(fm?.Date ?? ""))?.[1] ??
+					ISO.exec(String(fm?.date ?? fm?.Date ?? ""))?.[1] ??
 					/\*\*Date\*\*\s*:\s*(\d{4}-\d{2}-\d{2})/.exec(content)?.[1] ??
 					dateKey(new Date(f.stat.ctime));
-				add(c, date, ticketCount(f.basename));
+				add(c, date, ticketCount(f.basename, prefixes));
 			}
 			return c;
 		},
