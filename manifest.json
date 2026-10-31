@@ -1,6 +1,6 @@
 {
-	"id": "cool-dashboard",
-	"name": "Aurora Dashboard",
+	"id": "aurora-dashboard-soc",
+	"name": "Aurora Dashboard (SOC)",
 	"version": "1.2.11",
 	"minAppVersion": "1.13.0",
 	"description": "A polished interactive dashboard and control center with draggable widgets, a calendar, and activity tracking.",
