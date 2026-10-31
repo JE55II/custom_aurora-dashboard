@@ -15,10 +15,9 @@ A fork of [stef4678/aurora-dashboard](https://github.com/stef4678/aurora-dashboa
 
 Source: [`src/widgets/graph.ts`](src/widgets/graph.ts).
 
-### Note heatmap and CVEs per day
+### Note heatmap
 
-- **Note heatmap**: a year heatmap (Jan 1 → today) for one source, picked in the widget settings: *Daily News* (`📡Koffei/Daily CyberNews`, notes tagged `#CyberNews`), *SOC Operations* (`♻️ DailyNotes/Soc Operation/SocTickets/YYYY/MM-Month/DD`, tagged `#soc_operation`) or *Astreinte* (`🔎⏰Astreintes`, tagged `#astreinte`). Same rules as the "Heatmaps for nerds" dataviewjs blocks (one note = one post; a ticket note counts each distinct `HOR-n` ID in its name), without Dataview or Heatmap Calendar.
-- **CVEs per day**: bars of new CVEs per day over the last 30 days (7–90), read from the `## Update Tracker` section of `CVE-Report-Index`. The count comes from each run's title ("87 new CVEs", "twenty new CVEs", "one CVE added"); untitled counts fall back to a "- N CVEs" line, then to CVE IDs seen in the tracker for the first time. Hover a bar for the runs behind it.
+- **Note heatmap**: a year heatmap (Jan 1 → today) for one source, picked in the widget settings: *SOC Operations* (`♻️ DailyNotes/Soc Operation/SocTickets/YYYY/MM-Month/DD`, tagged `#soc_operation`) or *Astreinte* (`🔎⏰Astreintes`, tagged `#astreinte`). A note counts once per ticket ID in its name; the ID prefix is read from `const TICKET_PREFIX = "…"` in the templates of the vault. The *Astreinte* date comes from the `date` property (or the legacy `Date`), then a `**Date** :` line, then the file creation date.
 
 Source: [`src/widgets/nerds.ts`](src/widgets/nerds.ts).
 

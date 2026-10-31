@@ -4,9 +4,8 @@ import { registerWidgetType } from "../registry";
 import { dateKey } from "../utils";
 
 /**
- * Ports of the "Heatmaps for nerds" dataviewjs blocks (Five9s vault) and a CVE
- * chart fed by the CVE-Report Update Tracker. Same counting rules as the notes,
- * but native, so they need neither Dataview nor Heatmap Calendar.
+ * Year heatmaps of the SOC ticket and night-duty (astreinte) notes. Native, so
+ * they need neither Dataview nor Heatmap Calendar.
  */
 
 type Counts = Record<string, number>;
@@ -55,22 +54,6 @@ function add(c: Counts, date: string, n: number): void {
 }
 
 const SOURCES: Record<string, Source> = {
-	"Daily News": {
-		folder: "📡Koffei/Daily CyberNews",
-		color: "hsl(119, 45%, 45%)",
-		unit: "post",
-		async count(app, files) {
-			const c: Counts = {};
-			for (const f of files) {
-				const tags = tagsOf(app, f);
-				if (!tags.includes("cybernews") || tags.includes("index")) continue;
-				const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-				const date = ISO.exec(f.basename)?.[1] ?? ISO.exec(String(fm?.date ?? ""))?.[1];
-				if (date) add(c, date, 1);
-			}
-			return c;
-		},
-	},
 	"SOC Operations": {
 		folder: "♻️ DailyNotes/Soc Operation/SocTickets",
 		color: "hsl(119, 45%, 45%)",
@@ -136,7 +119,7 @@ function refreshOnChange(ctx: WidgetCtx): void {
 export const noteHeatmapType: WidgetType = {
 	type: "noteheatmap",
 	name: "Note heatmap",
-	description: "Year heatmap of Daily News posts, SOC operations or astreintes",
+	description: "Year heatmap of SOC operations or astreintes",
 	icon: "calendar-range",
 	min: { w: 4, h: 2 },
 	defaultSize: { w: 6, h: 3 },
@@ -198,134 +181,4 @@ export const noteHeatmapType: WidgetType = {
 	},
 };
 
-// ---- CVEs per day ---------------------------------------------------------
-
-const WORDS: Record<string, number> = {
-	one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-	eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
-	eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
-};
-const NUM = `\\b(\\d+|${Object.keys(WORDS).join("|")})`;
-const toNum = (s: string): number => WORDS[s.toLowerCase()] ?? Number(s);
-
-export interface TrackerRun {
-	date: string;
-	title: string;
-	added: number;
-}
-
-/**
- * Reads the "## Update Tracker" section: each bold "Run of DD/MM/YYYY …" line opens a
- * run. New CVEs come from the run title ("(87 new CVEs)", "twenty new CVEs", "four more
- * CVEs", "one CVE added"); a title that says "added" without a number falls back to a
- * "- N CVEs …" body line, then to the CVE IDs mentioned in the tracker for the first
- * time. Recheck-only runs add 0.
- */
-export function parseTracker(md: string): TrackerRun[] {
-	const start = md.search(/^## Update Tracker\s*$/m);
-	if (start < 0) return [];
-	const rest = md.slice(start).split("\n").slice(1);
-	const end = rest.findIndex((l) => /^#{1,2} /.test(l));
-	const lines = end < 0 ? rest : rest.slice(0, end);
-
-	const runs: Array<{ date: string; title: string; body: string[] }> = [];
-	for (const l of lines) {
-		const m = /^\*\*(.*?(\d{2})\/(\d{2})\/(\d{4}).*?)\*\*\s*$/.exec(l);
-		if (m) runs.push({ date: `${m[4]}-${m[3]}-${m[2]}`, title: m[1], body: [] });
-		else runs[runs.length - 1]?.body.push(l);
-	}
-	const seen = new Set<string>();
-	return runs.map(({ date, title, body }) => {
-		const t = title.toLowerCase();
-		const ids = [...new Set(body.join("\n").match(/CVE-\d{4}-\d{4,}/g) ?? [])];
-		const firstSeen = ids.filter((id) => !seen.has(id)).length;
-		ids.forEach((id) => seen.add(id));
-		const n =
-			new RegExp(`${NUM} (?:new|more) (?:cves?|identifiers?)`).exec(t) ??
-			new RegExp(`${NUM} cves? added`).exec(t) ??
-			new RegExp(`— ${NUM} cves?$`).exec(t);
-		let added = n ? toNum(n[1]) : 0;
-		if (!n && /\b(added|new)\b/.test(t)) {
-			const line = body.map((l) => /^- (\d+) CVEs\b/.exec(l)).find(Boolean);
-			added = line ? Number(line[1]) : firstSeen;
-		}
-		return { date, title, added };
-	});
-}
-
-export const cveChartType: WidgetType = {
-	type: "cvechart",
-	name: "CVEs per day",
-	description: "New CVEs added per day, from the CVE-Report Update Tracker",
-	icon: "shield-alert",
-	min: { w: 4, h: 2 },
-	defaultSize: { w: 6, h: 3 },
-	defaultSettings: { path: "📡Koffei/Articles/CVE-Report/CVE-Report-Index.md", days: 30 },
-	settings: [
-		{ key: "path", label: "Report note", type: "text", placeholder: "path/to/CVE-Report-Index.md" },
-		{ key: "days", label: "Days shown", type: "number", min: 7, max: 90 },
-	],
-	render(ctx) {
-		const app = ctx.plugin.app;
-		const path = String(ctx.inst.settings.path ?? "");
-		const days = Math.max(7, Math.min(90, Number(ctx.inst.settings.days ?? 30) || 30));
-		const file = app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) {
-			ctx.body.createDiv("dash-empty").setText(`Note not found: ${path || "(none)"}`);
-			return {};
-		}
-		const chart = ctx.body.createDiv("dash-cve");
-		const stats = ctx.body.createDiv("dash-hm-stats");
-		let alive = true;
-		ctx.onDispose?.(() => (alive = false));
-		const onModify = (f: unknown): void => {
-			if (f === file) ctx.refresh();
-		};
-		app.vault.on("modify", onModify);
-		ctx.onDispose?.(() => app.vault.off("modify", onModify));
-
-		void app.vault.cachedRead(file).then((md) => {
-			if (!alive) return;
-			const byDay = new Map<string, TrackerRun[]>();
-			for (const r of parseTracker(md)) byDay.set(r.date, [...(byDay.get(r.date) ?? []), r]);
-			const today = new Date();
-			const series: Array<{ key: string; d: Date; n: number; runs: TrackerRun[] }> = [];
-			for (let i = days - 1; i >= 0; i--) {
-				const d = new Date(today);
-				d.setDate(d.getDate() - i);
-				const runs = byDay.get(dateKey(d)) ?? [];
-				series.push({ key: dateKey(d), d, n: runs.reduce((a, r) => a + r.added, 0), runs });
-			}
-			const max = Math.max(1, ...series.map((s) => s.n));
-			for (const s of series) {
-				const col = chart.createDiv("dash-cve-col");
-				const plot = col.createDiv("dash-spark-plot");
-				const bar = plot.createDiv("dash-spark-bar");
-				bar.style.height = s.n ? `${Math.max(4, Math.round((s.n / max) * 100))}%` : "0";
-				if (!s.n) bar.addClass("dash-cve-zero");
-				col.setAttr(
-					"title",
-					`${s.key} · ${s.n} new CVE${s.n === 1 ? "" : "s"}` +
-						s.runs.map((r) => `\n• ${r.title} (+${r.added})`).join("")
-				);
-				const lab = col.createDiv("dash-spark-label");
-				// Label Mondays and today only, so 30+ bars stay readable.
-				if (s.d.getDay() === 1 || s.key === dateKey(today)) lab.setText(String(s.d.getDate()));
-				if (s.key === dateKey(today)) lab.addClass("dash-spark-today");
-			}
-			const total = series.reduce((a, s) => a + s.n, 0);
-			const chip = (text: string, title: string): void => {
-				const el = stats.createDiv("dash-hm-chip");
-				el.setText(text);
-				el.setAttr("title", title);
-			};
-			chip(`${days}d · ${total} new`, `New CVEs in the last ${days} days`);
-			chip(`Runs · ${series.reduce((a, s) => a + s.runs.length, 0)}`, "Tracker runs in the period");
-			chip(`Peak · ${max === 1 && !total ? 0 : max}`, "Most new CVEs in one day");
-		});
-		return {};
-	},
-};
-
 registerWidgetType(noteHeatmapType);
-registerWidgetType(cveChartType);

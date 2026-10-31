@@ -206,7 +206,7 @@ export function defaultLayout(columns = 12): WidgetInstance[] {
 		{ type: "embed", x: 6, y: 19, w: 6, h: 4 },
 		{ type: "graph", x: 0, y: 23, w: 12, h: 6 },
 		{ type: "noteheatmap", x: 0, y: 29, w: 6, h: 3 },
-		{ type: "cvechart", x: 6, y: 29, w: 6, h: 3 },
+		{ type: "noteheatmap", x: 6, y: 29, w: 6, h: 3, settings: { source: "Astreinte" } },
 	]);
 
 	const cols = Math.max(1, Math.round(columns));
